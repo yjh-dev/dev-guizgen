@@ -1,13 +1,14 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useQuizStore } from "@/store/useQuizStore";
 import { useUser } from "@/hooks/useUser";
 import { useQuizLimit } from "@/hooks/useQuizLimit";
+import { validateQuizForm, hasValidationErrors } from "@/lib/validation";
+import type { ValidationErrors } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -21,61 +22,79 @@ import {
   QUESTION_TYPES,
   DIFFICULTY_OPTIONS,
   QUESTION_COUNT_OPTIONS,
-  SOURCE_TEXT_MAX_LENGTH,
 } from "@/lib/constants";
-import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { AlertCircle, RotateCcw, ArrowLeft } from "lucide-react";
+import GenerationProgress from "./GenerationProgress";
+import GenerationComplete from "./GenerationComplete";
+import SourceInput from "./SourceInput";
 
 export default function QuizForm() {
-  const router = useRouter();
   const { profile } = useUser();
   const { canGenerate, remaining, maxQuestions } = useQuizLimit(profile);
+  const [fieldErrors, setFieldErrors] = useState<ValidationErrors>({});
 
   const {
     title,
     sourceText,
+    sourceType,
     questionCount,
     questionTypes,
     difficulty,
     isGenerating,
+    generationStep,
+    errorInfo,
+    completedData,
     setTitle,
     setSourceText,
+    setSourceType,
     setQuestionCount,
     toggleQuestionType,
     setDifficulty,
     setIsGenerating,
-    setError,
+    setGenerationStep,
+    setErrorInfo,
+    setCompletedData,
+    reset,
+    resetGeneration,
   } = useQuizStore();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    // 클라이언트 검증
+    const errors = validateQuizForm({ title, sourceText, questionTypes });
+    setFieldErrors(errors);
+    if (hasValidationErrors(errors)) return;
+
     if (!canGenerate) {
-      toast.error("오늘 퀴즈 생성 횟수를 모두 사용했습니다.");
-      return;
-    }
-
-    if (!sourceText.trim()) {
-      toast.error("텍스트를 입력해주세요.");
-      return;
-    }
-
-    if (!title.trim()) {
-      toast.error("퀴즈 제목을 입력해주세요.");
+      setErrorInfo({
+        message: "오늘 퀴즈 생성 횟수를 모두 사용했습니다.",
+        code: "DAILY_LIMIT_EXCEEDED",
+        retryable: false,
+      });
+      setGenerationStep("error");
       return;
     }
 
     setIsGenerating(true);
-    setError(null);
+    setErrorInfo(null);
+    setCompletedData(null);
+
+    // 단계 시뮬레이션: validating
+    setGenerationStep("validating");
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 단계: generating
+    setGenerationStep("generating");
 
     try {
       const response = await fetch("/api/quiz/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
-          source_text: sourceText,
-          source_type: "text",
+          title: title.trim(),
+          source_text: sourceText.trim(),
+          source_type: sourceType,
           question_count: questionCount,
           question_types: questionTypes,
           difficulty,
@@ -85,25 +104,101 @@ export default function QuizForm() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "퀴즈 생성에 실패했습니다.");
+        setErrorInfo({
+          message: data.error || "퀴즈 생성에 실패했습니다.",
+          code: data.code || "UNKNOWN_ERROR",
+          retryable: data.retryable ?? true,
+        });
+        setGenerationStep("error");
+        setIsGenerating(false);
+        return;
       }
 
-      toast.success("퀴즈가 생성되었습니다!");
-      router.push(`/quiz/${data.quiz_id}`);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "퀴즈 생성에 실패했습니다.";
-      setError(message);
-      toast.error(message);
+      // 단계: saving
+      setGenerationStep("saving");
+      await new Promise((r) => setTimeout(r, 600));
+
+      // 완료
+      setCompletedData(data);
+      setGenerationStep("completed");
+    } catch {
+      setErrorInfo({
+        message: "네트워크 오류가 발생했습니다. 인터넷 연결을 확인해주세요.",
+        code: "UNKNOWN_ERROR",
+        retryable: true,
+      });
+      setGenerationStep("error");
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  function handleRetry() {
+    resetGeneration();
+    const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+    handleSubmit(fakeEvent);
+  }
+
+  function handleBackToForm() {
+    resetGeneration();
+    setFieldErrors({});
+  }
+
+  function handleNewQuiz() {
+    reset();
+    setFieldErrors({});
   }
 
   const filteredCountOptions = QUESTION_COUNT_OPTIONS.filter(
     (n) => n <= maxQuestions
   );
 
+  // 생성 완료 화면
+  if (generationStep === "completed" && completedData) {
+    return <GenerationComplete summary={completedData} onNewQuiz={handleNewQuiz} />;
+  }
+
+  // 생성 진행 중 화면
+  if (
+    isGenerating &&
+    generationStep !== "idle" &&
+    generationStep !== "error"
+  ) {
+    return <GenerationProgress currentStep={generationStep} />;
+  }
+
+  // 에러 화면
+  if (generationStep === "error" && errorInfo) {
+    return (
+      <div className="space-y-6">
+        <Card className="border-destructive">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5" />
+              퀴즈 생성 실패
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm">{errorInfo.message}</p>
+            <div className="flex gap-3">
+              {errorInfo.retryable && (
+                <Button onClick={handleRetry} variant="default">
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  다시 시도
+                </Button>
+              )}
+              <Button onClick={handleBackToForm} variant="outline">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                입력 수정
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // 기본 폼
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <Card>
@@ -117,29 +212,38 @@ export default function QuizForm() {
               id="title"
               placeholder="예: 한국사 근현대사 퀴즈"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              required
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (fieldErrors.title) {
+                  setFieldErrors((prev) => ({ ...prev, title: undefined }));
+                }
+              }}
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="source">학습 텍스트</Label>
-            <Textarea
-              id="source"
-              placeholder="퀴즈를 생성할 텍스트를 입력하세요..."
-              value={sourceText}
-              onChange={(e) => setSourceText(e.target.value)}
-              maxLength={SOURCE_TEXT_MAX_LENGTH}
-              rows={8}
-              required
-            />
-            <p className="text-xs text-muted-foreground">
-              {sourceText.length.toLocaleString()} /{" "}
-              {SOURCE_TEXT_MAX_LENGTH.toLocaleString()}자
-            </p>
+            {fieldErrors.title && (
+              <p className="text-sm text-destructive">{fieldErrors.title}</p>
+            )}
           </div>
         </CardContent>
       </Card>
+
+      <SourceInput
+        sourceType={sourceType}
+        sourceText={sourceText}
+        onSourceTypeChange={(type) => {
+          setSourceType(type);
+          setSourceText("");
+          if (fieldErrors.sourceText) {
+            setFieldErrors((prev) => ({ ...prev, sourceText: undefined }));
+          }
+        }}
+        onSourceTextChange={(text) => {
+          setSourceText(text);
+          if (fieldErrors.sourceText) {
+            setFieldErrors((prev) => ({ ...prev, sourceText: undefined }));
+          }
+        }}
+        error={fieldErrors.sourceText}
+      />
 
       <Card>
         <CardHeader>
@@ -153,17 +257,28 @@ export default function QuizForm() {
                 <Badge
                   key={type.value}
                   variant={
-                    questionTypes.includes(type.value)
-                      ? "default"
-                      : "outline"
+                    questionTypes.includes(type.value) ? "default" : "outline"
                   }
                   className="cursor-pointer"
-                  onClick={() => toggleQuestionType(type.value)}
+                  onClick={() => {
+                    toggleQuestionType(type.value);
+                    if (fieldErrors.questionTypes) {
+                      setFieldErrors((prev) => ({
+                        ...prev,
+                        questionTypes: undefined,
+                      }));
+                    }
+                  }}
                 >
                   {type.label}
                 </Badge>
               ))}
             </div>
+            {fieldErrors.questionTypes && (
+              <p className="text-sm text-destructive">
+                {fieldErrors.questionTypes}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -213,14 +328,7 @@ export default function QuizForm() {
           </span>
         </p>
         <Button type="submit" disabled={isGenerating || !canGenerate} size="lg">
-          {isGenerating ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              생성 중...
-            </>
-          ) : (
-            "퀴즈 생성"
-          )}
+          퀴즈 생성
         </Button>
       </div>
     </form>

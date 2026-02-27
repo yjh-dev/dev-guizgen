@@ -1,6 +1,6 @@
 export type QuestionType = "multiple_choice" | "true_false" | "short_answer";
 export type Difficulty = "easy" | "medium" | "hard";
-export type SourceType = "text" | "pdf" | "url";
+export type SourceType = "text" | "pdf" | "url" | "image" | "youtube";
 
 export interface Question {
   id: string;
@@ -55,4 +55,31 @@ export interface GeneratedQuestion {
   options: string[] | null;
   correct_answer: string;
   explanation: string;
+}
+
+export type QuizErrorCode =
+  | "AUTH_REQUIRED"
+  | "PROFILE_NOT_FOUND"
+  | "DAILY_LIMIT_EXCEEDED"
+  | "VALIDATION_FAILED"
+  | "AI_GENERATION_FAILED"
+  | "DB_SAVE_FAILED"
+  | "UNKNOWN_ERROR";
+
+export interface QuizErrorResponse {
+  error: string;
+  code: QuizErrorCode;
+  retryable: boolean;
+}
+
+export interface GenerationSummary {
+  quiz_id: string;
+  title: string;
+  total_questions: number;
+  type_distribution: Record<QuestionType, number>;
+  questions_preview: {
+    question: string;
+    type: QuestionType;
+    options: string[] | null;
+  }[];
 }

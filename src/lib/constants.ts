@@ -39,3 +39,13 @@ export const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
 export const QUESTION_COUNT_OPTIONS = [5, 10, 15, 20, 25, 30];
 
 export const SOURCE_TEXT_MAX_LENGTH = 8000;
+export const SOURCE_TEXT_MIN_LENGTH = 50;
+export const TITLE_MIN_LENGTH = 2;
+export const TITLE_MAX_LENGTH = 100;
+
+export const PDF_MAX_SIZE_MB = 10;
+export const PDF_MAX_SIZE_BYTES = PDF_MAX_SIZE_MB * 1024 * 1024;
+export const IMAGE_MAX_SIZE_MB = 5;
+export const IMAGE_MAX_SIZE_BYTES = IMAGE_MAX_SIZE_MB * 1024 * 1024;
+export const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+export const ALLOWED_PDF_TYPES = ["application/pdf"];
